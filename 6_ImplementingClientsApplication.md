@@ -362,4 +362,6 @@ We will put the whole logic into `assets/src/room.ts`. Methods responsible for h
  <br>
  and then join a room with a given name!
  Later on, you can visit your video room's page once again, from another browser's tab or from another browser's window (or even another browser - however the recommended browsers to use are Chrome and Firefox) and join the same room as before - you should start seeing two participants in the same room!
+ <br><br>
+ [NEXT STEP - Further steps](7_FurtherSteps.md)
 

@@ -175,6 +175,8 @@ How about messages coming from the client, via the `PeerChannel`? We need to pas
  The last thing we do is to update the state - we remove the mapping (peer_id->peer_channel_pid) from our ```:peer_channels``` map.
 
  After all of this hard work our server is finally ready. But we still need a client application.
+ <br><br>
+ [NEXT STEP - Client's application](6_ImplementingClientsApplication.md)
 
  
 

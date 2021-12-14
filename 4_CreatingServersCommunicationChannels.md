@@ -130,3 +130,5 @@ title: 4. Server's communication channels
  Note the use of `push` method provided by Phoenix.Channel. 
 
  Great job! You have just implemented the server's side of our communication channel. How about adding our server's business logic?
+ <br><br>
+ [NEXT STEP - Server's room process](5_ImplementingServerRoom.md)

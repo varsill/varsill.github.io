@@ -62,3 +62,5 @@ title: 3. System architecture
   At the same time, `MembraneWebRTC` object will be able to change the `Room`'s state by invoking the callbacks provided during construction of this object. These callbacks as well as the `Room` object itself will be able to update the user's interface. 
   
   Be aware that `MembraneWebRTC` object will also take care of the incoming media stream.
+  <br><br>
+ [NEXT STEP - Server's communication channels](4_CreatingServersCommunicationChannels.md)
