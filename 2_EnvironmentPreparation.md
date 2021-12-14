@@ -101,3 +101,4 @@ export PKG_CONFIG_PATH="/usr/local/ssl/lib/pkgconfig"
  Here you will find static assets. They can be generated, for instance, from the files contained in assets/ directory (.ts which are in assets/src are converted into .js files put inside priv/static/js). Not interesting at all, despite the fact, that we needed to load /js/room.js script file from here ;)
  <br><br>
  [NEXT STEP - System architecture](3_SystemArchitecture.md)
+ [List of contents](index.md)

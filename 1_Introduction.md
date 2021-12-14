@@ -40,4 +40,5 @@ Here you can see how our application should work. We want to be able to open the
 
  + [WebRTC architectures](https://medium.com/securemeeting/webrtc-architecture-basics-p2p-sfu-mcu-and-hybrid-approaches-6e7d77a46a66)
  Take a quick glance there and find out what are possible architectures of WebRTC servers, when to use which architecture, and how to build a streaming solution that scales and behaves well. <br><br>
- [NEXT STEP - Environment preparation](2_EnvironmentPreparation.md)
+ [NEXT STEP - Environment preparation](2_EnvironmentPreparation.md)<br>
+ [List of contents](index.md)

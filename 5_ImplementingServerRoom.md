@@ -176,7 +176,8 @@ The last thing we do is to update the state - we remove the mapping (peer_id->pe
 
 After all of this hard work our server is finally ready. But we still need a client application.
 <br><br>
-[NEXT STEP - Client's application](6_ImplementingClientsApplication.md)
+[NEXT STEP - Client's application](6_ImplementingClientsApplication.md)<br>
+[List of contents](index.md)
 
  
 
