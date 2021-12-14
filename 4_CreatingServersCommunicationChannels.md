@@ -1,3 +1,5 @@
+# Server communication 
+
 # I know you have been waiting for that moment - let's start coding!
  ## Let's prepare the server's endpoint
  Do you still remember about Phoenix's sockets? Hopefully, since we will make use of them in a moment! We want to provide a communication channel between our client's application and our server.
