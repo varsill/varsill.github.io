@@ -1,3 +1,6 @@
+---
+title: 7. Further steps
+---
 # What to do next?
  We can share with you inspiration for further improvements!
  ## Voice activation detection

@@ -1,4 +1,6 @@
-# Environment Preparation
+---
+title: 2. Environment preparation
+---
 # Getting started
 
 ## Elixir installation

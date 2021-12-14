@@ -1,4 +1,6 @@
-# Server communication 
+---
+title: 4. Server's communication channels
+---
 
 # I know you have been waiting for that moment - let's start coding!
  ## Let's prepare the server's endpoint

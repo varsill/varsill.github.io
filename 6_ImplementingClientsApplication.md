@@ -1,4 +1,6 @@
-# Client's application
+---
+title: 6. Client's application
+---
 ## Let's implement the client's endpoint!
 We will put the whole logic into `assets/src/room.ts`. Methods responsible for handling UI are already in `assets/src/room_ui.ts`, let's import them: 
  ```ts

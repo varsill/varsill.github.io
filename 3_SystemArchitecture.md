@@ -1,4 +1,6 @@
-# System Architecture
+---
+title: 3. System architecture
+---
 # Planning is always a good idea
   Hang on for a moment! I know that after slipping through the tons of the documentation you are really eager to start coding, but let's think for a moment before taking any actions. How do we want our application to look like?
   Can we somehow decompose our application?
