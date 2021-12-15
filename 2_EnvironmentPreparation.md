@@ -56,6 +56,23 @@ export PKG_CONFIG_PATH=/opt/homebrew/Cellar/openssl@1.1/1.1.1l_1/lib/pkgconfig/
 export PKG_CONFIG_PATH="/usr/local/ssl/lib/pkgconfig"
 ```
 
+
+# Setting environment with the use of Docker
+Alternatively you can make use of the docker image we have prepared for the purpouse of this tutorial.
+You won't need to install any native dependencies there nor export environmental variables - however **your computer needs to be running on the Intel processor**.
+
+If you are using VS Code for your code development, you can make use of the [Remote - Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension. Among the files you have just cloned from the repository there should be a `.devcontainer.json` configuration file placed in the root directory of the project. It contains information about which image from the Docker Hub should be cloned and how the ports should be redirected between the container and the host.
+After the installation of the Remote - Containers extension you will be able to start the container by clicking on the green button in the left-down corner of VS Code windows and the selecting "Reopen in the Container" option.
+This will cause all the files in the project's root directory to be shared between your host OS and the container - therefore any changes made to them on your local machine will be immediately reflected in the container. 
+At the same time, you will be able to run the project from the inside of the container - with the terminal launched in the VS Code window (`Terminal -> New Terminal`).
+
+If you are not using VS Code, you can still take advantage of the virtualization and use the image provided by us - however, you will need to create the shared filesystem volume and bridge the networks on your own. Here is the command which will make this for you:
+```
+docker run -p 4000:4000 -it -v <path_to_cloned_templates>:/videoroom membraneframeworklabs/docker_membrane
+```
+where `<path_to_cloned_templates>` is the **absolute** path to the root directory of the project on your local system.
+After running the command, a container terminal will be attached to your terminal. You will be able to find the project code inside the container in the `/videoroom` directory.
+
 # What do we have here?
  Let's make some reconnaissance. 
  First, let's run the template.
