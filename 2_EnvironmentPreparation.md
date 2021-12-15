@@ -26,7 +26,7 @@ git checkout template/start
 
 In case you find yourself lost along with the tutorial, feel free to check the suggested implementation provided by us, which is available on the `template/end` branch of this repository.
 
-+ # Install native dependencies
+# Install native dependencies
 First, some native dependencies are needed. Here is how you can install them.
 ## Mac OS X
 ```
@@ -57,7 +57,7 @@ export PKG_CONFIG_PATH="/usr/local/ssl/lib/pkgconfig"
 ```
 
 
-+ # Setting environment with the use of Docker
+# Setting environment with the use of Docker
 Alternatively to the steps described in the section above, you can make use of the docker image we have prepared for the purpose of this tutorial.
 You won't need to install any native dependencies there nor export environmental variables - however **your computer cannot be running on M1 processor**.
 
