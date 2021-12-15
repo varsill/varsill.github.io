@@ -21,7 +21,7 @@
 title: Membrane Framework Videoroom Tutorial
 email: lukasz.kita@swmansion.com
 description: >- # this means to ignore newlines until "baseurl:"
-  Create your very own video conference room with the help of the Membrane Framework!
+  Create your very own video conference room with a little help from the Membrane Framework!
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com
 github_username:  membraneframework
