@@ -1,4 +1,4 @@
-Create your very own video conference room with the help of the Membrane Framework!
+{{site.description}}
 Sections:
 + [Introduction](1_Introduction.md)
 + [Environment preparation](2_EnvironmentPreparation.md)
