@@ -26,7 +26,7 @@ git checkout template/start
 
 In case you find yourself lost along with the tutorial, feel free to check the suggested implementation provided by us, which is available on the `template/end` branch of this repository.
 
-# Install native dependencies
++ # Install native dependencies
 First, some native dependencies are needed. Here is how you can install them.
 ## Mac OS X
 ```
@@ -57,9 +57,9 @@ export PKG_CONFIG_PATH="/usr/local/ssl/lib/pkgconfig"
 ```
 
 
-# Setting environment with the use of Docker
-Alternatively you can make use of the docker image we have prepared for the purpouse of this tutorial.
-You won't need to install any native dependencies there nor export environmental variables - however **your computer needs to be running on the Intel processor**.
++ # Setting environment with the use of Docker
+Alternatively to the steps described in the section above, you can make use of the docker image we have prepared for the purpose of this tutorial.
+You won't need to install any native dependencies there nor export environmental variables - however **your computer cannot be running on M1 processor**.
 
 If you are using VS Code for your code development, you can make use of the [Remote - Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension. Among the files you have just cloned from the repository there should be a `.devcontainer.json` configuration file placed in the root directory of the project. It contains information about which image from the Docker Hub should be cloned and how the ports should be redirected between the container and the host.
 After the installation of the Remote - Containers extension you will be able to start the container by clicking on the green button in the left-down corner of VS Code windows and the selecting "Reopen in the Container" option.
