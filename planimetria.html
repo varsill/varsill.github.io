@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kratka – tablica do planimetrii</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=STIX+Two+Text:ital,wght@1,500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#fcfcfa; --panel:#ffffff; --fg:#1d2433; --muted:#667085; --border:#dfe3ea;
+  --grid:#dbe5f0; --grid-strong:#c4d4e6;
+  --ink:#1e3a8a; --aux:#0e8a87; --point:#1e3a8a; --sel:#d97706; --accent-bg:#e8eefc;
+  --graphite:#3b3f46;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#15181d; --panel:#1c2026; --fg:#e7eaf0; --muted:#98a1b0; --border:#2e343d;
+    --grid:#212831; --grid-strong:#2b3440;
+    --ink:#93b4ff; --aux:#4fd1c5; --point:#93b4ff; --sel:#fbbf24; --accent-bg:#26324a;
+    --graphite:#d6d9df;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#15181d; --panel:#1c2026; --fg:#e7eaf0; --muted:#98a1b0; --border:#2e343d;
+  --grid:#212831; --grid-strong:#2b3440;
+  --ink:#93b4ff; --aux:#4fd1c5; --point:#93b4ff; --sel:#fbbf24; --accent-bg:#26324a;
+  --graphite:#d6d9df;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--paper);color:var(--fg);
+  font:14px/1.4 "Instrument Sans",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.bar{display:flex;flex-wrap:wrap;gap:3px;align-items:center;padding:7px 10px;background:var(--panel);border-bottom:1px solid var(--border)}
+.bar button{
+  font:inherit;font-size:13px;font-weight:500;color:var(--fg);background:transparent;
+  border:1px solid transparent;border-radius:7px;padding:5px 9px;cursor:pointer;white-space:nowrap;
+}
+.bar button:hover{background:var(--accent-bg)}
+.bar button:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+.bar button.on{background:var(--accent-bg);border-color:var(--ink);color:var(--ink)}
+.bar button kbd{font:11px ui-monospace,Menlo,monospace;color:var(--muted);margin-left:5px}
+.sep{width:1px;height:22px;background:var(--border);margin:0 5px;flex:none}
+.bar button.sw{width:22px;height:22px;border-radius:50%;padding:0;border:2px solid var(--panel);box-shadow:0 0 0 1px var(--border);flex:none}
+.bar button.sw.on{box-shadow:0 0 0 2px var(--ink)}
+.hint{padding:6px 12px;font-size:13px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--panel);min-height:32px;display:flex;gap:12px;align-items:center}
+.hint #msg{color:var(--fg)}
+.hint #flash{color:var(--sel);font-weight:500}
+#wrap{flex:1;position:relative;min-height:0}
+canvas{position:absolute;inset:0;touch-action:none;display:block}
+#ren{
+  position:absolute;display:none;width:64px;padding:2px 6px;
+  font:italic 500 16px "STIX Two Text",Georgia,"Times New Roman",serif;
+  border:1px solid var(--ink);border-radius:6px;background:var(--panel);color:var(--fg);
+}
+@media (max-width:760px){
+  .bar{flex-wrap:nowrap;overflow-x:auto}
+  .bar button kbd{display:none}
+}
+</style>
+</head>
+<body>
+<div class="bar" id="bar"></div>
+<div class="hint"><span id="msg"></span><span id="flash"></span></div>
+<div id="wrap"><canvas id="c"></canvas><input id="ren" maxlength="6" aria-label="Nazwa punktu"></div>
+
+<script>
+(() => {
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const wrap = document.getElementById('wrap'), bar = document.getElementById('bar');
+const msgEl = document.getElementById('msg'), flashEl = document.getElementById('flash');
+const ren = document.getElementById('ren');
+const STORE = 'kratka-planimetria-v1';
+const UNIT = 40;              // one grid square = 1 unit for lengths
+const AUX = new Set(['perpbis','angbis','perp','par','compass','cl']);
+const PENS = ['graphite','#e5484d','#2f80ed','#2f9e6b'];
+
+let W = 0, H = 0, DPR = 1;
+let view = {x:-60, y:-40, s:1};
+let objs = [], strokes = [], nid = 1;
+const byId = new Map();
+let tool = 'move', pending = [], polyPts = [];
+let showLen = false, pen = 0;
+let hover = null, drag = null, pan = null, curStroke = null, erasing = false;
+const undoStack = [], redoStack = [];
+const touches = new Map(); let pinch = null;
+let C = {};
+
+/* ---------- colours ---------- */
+function readColors(){
+  const cs = getComputedStyle(document.documentElement);
+  for (const k of ['paper','fg','muted','grid','grid-strong','ink','aux','point','sel','graphite'])
+    C[k] = cs.getPropertyValue('--'+k).trim();
+}
+const penColor = c => c === 'graphite' ? C.graphite : c;
+
+/* ---------- math helpers ---------- */
+const dist = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const P = id => byId.get(id);
+function distPL(p, a, b){
+  const dx=b.x-a.x, dy=b.y-a.y, l=Math.hypot(dx,dy);
+  if (l < 1e-12) return dist(p,a);
+  return Math.abs((p.x-a.x)*dy - (p.y-a.y)*dx) / l;
+}
+function circum(A,B,C3){
+  const d = 2*(A.x*(B.y-C3.y) + B.x*(C3.y-A.y) + C3.x*(A.y-B.y));
+  if (Math.abs(d) < 1e-9) return null;
+  const a2=A.x*A.x+A.y*A.y, b2=B.x*B.x+B.y*B.y, c2=C3.x*C3.x+C3.y*C3.y;
+  return { x:(a2*(B.y-C3.y)+b2*(C3.y-A.y)+c2*(A.y-B.y))/d,
+           y:(a2*(C3.x-B.x)+b2*(A.x-C3.x)+c2*(B.x-A.x))/d };
+}
+function inRange(sub, t){
+  const e = 1e-9;
+  if (sub === 'segment') return t >= -e && t <= 1+e;
+  if (sub === 'ray') return t >= -e;
+  return true;
+}
+function interLL(a, b){
+  const dx1=a.x2-a.x1, dy1=a.y2-a.y1, dx2=b.x2-b.x1, dy2=b.y2-b.y1;
+  const den = dx1*dy2 - dy1*dx2;
+  if (Math.abs(den) < 1e-12) return [];
+  const ex=b.x1-a.x1, ey=b.y1-a.y1;
+  const t=(ex*dy2-ey*dx2)/den, u=(ex*dy1-ey*dx1)/den;
+  if (!inRange(a.sub,t) || !inRange(b.sub,u)) return [];
+  return [{x:a.x1+t*dx1, y:a.y1+t*dy1}];
+}
+function interLC(l, c){
+  const dx=l.x2-l.x1, dy=l.y2-l.y1, fx=l.x1-c.cx, fy=l.y1-c.cy;
+  const A=dx*dx+dy*dy, B=2*(fx*dx+fy*dy), Cc=fx*fx+fy*fy-c.r*c.r;
+  let disc = B*B - 4*A*Cc;
+  if (A < 1e-12 || disc < -1e-7*A*Math.max(1,c.r*c.r)) return [];
+  disc = Math.max(0, disc);
+  const sq = Math.sqrt(disc), ts = sq < 1e-9 ? [-B/(2*A)] : [(-B-sq)/(2*A), (-B+sq)/(2*A)];
+  return ts.filter(t => inRange(l.sub,t)).map(t => ({x:l.x1+t*dx, y:l.y1+t*dy}));
+}
+function interCC(a, b){
+  const d = Math.hypot(b.cx-a.cx, b.cy-a.cy), e=1e-7;
+  if (d < 1e-9 || d > a.r+b.r+e || d < Math.abs(a.r-b.r)-e) return [];
+  const m = (a.r*a.r - b.r*b.r + d*d)/(2*d), h = Math.sqrt(Math.max(0, a.r*a.r - m*m));
+  const ux=(b.cx-a.cx)/d, uy=(b.cy-a.cy)/d, px=a.cx+m*ux, py=a.cy+m*uy;
+  if (h < 1e-9) return [{x:px,y:py}];
+  return [{x:px-h*uy, y:py+h*ux}, {x:px+h*uy, y:py-h*ux}];
+}
+function intersections(a, b){
+  if (a.type==='line' && b.type==='line') return interLL(a,b);
+  if (a.type==='line' && b.type==='circle') return interLC(a,b);
+  if (a.type==='circle' && b.type==='line') return interLC(b,a);
+  if (a.type==='circle' && b.type==='circle') return interCC(a,b);
+  return [];
+}
+function evalOn(c, t){
+  if (c.type === 'circle') return {x:c.cx+c.r*Math.cos(t), y:c.cy+c.r*Math.sin(t)};
+  if (c.sub === 'segment') t = clamp(t,0,1); else if (c.sub === 'ray') t = Math.max(0,t);
+  return {x:c.x1+t*(c.x2-c.x1), y:c.y1+t*(c.y2-c.y1)};
+}
+function paramOn(c, w){
+  if (c.type === 'circle') return Math.atan2(w.y-c.cy, w.x-c.cx);
+  const dx=c.x2-c.x1, dy=c.y2-c.y1;
+  return ((w.x-c.x1)*dx + (w.y-c.y1)*dy) / (dx*dx+dy*dy);
+}
+
+/* ---------- model ---------- */
+function compute(o){
+  const ps = (o.p || []).map(P);
+  if (ps.some(q => !q || !q.ok)) { o.ok = false; return; }
+  o.ok = true;
+  switch (o.kind){
+    case 'free': o.x=o.d.x; o.y=o.d.y; break;
+    case 'mid': o.x=(ps[0].x+ps[1].x)/2; o.y=(ps[0].y+ps[1].y)/2; break;
+    case 'on': { const q=evalOn(ps[0], o.d.t); o.x=q.x; o.y=q.y; if (!isFinite(o.x)) o.ok=false; break; }
+    case 'inter': {
+      const cand = intersections(ps[0], ps[1]);
+      if (!cand.length) { o.ok=false; break; }
+      const rx = o.x ?? o.d.x, ry = o.y ?? o.d.y;
+      let best=cand[0], bd=Infinity;
+      for (const q of cand){ const dd=(q.x-rx)**2+(q.y-ry)**2; if (dd<bd){bd=dd; best=q;} }
+      o.x=best.x; o.y=best.y; break;
+    }
+    case 'foot': {
+      const [L,Q]=ps, dx=L.x2-L.x1, dy=L.y2-L.y1, t=((Q.x-L.x1)*dx+(Q.y-L.y1)*dy)/(dx*dx+dy*dy);
+      o.x=L.x1+t*dx; o.y=L.y1+t*dy; break;
+    }
+    case 'circumcenter': { const r=circum(ps[0],ps[1],ps[2]); if(!r){o.ok=false;break;} o.x=r.x; o.y=r.y; break; }
+    case 'incenter': {
+      const [A,B,Cc]=ps, a=dist(B,Cc), b=dist(A,Cc), c=dist(A,B), s=a+b+c;
+      if (s < 1e-9 || distPL(Cc,A,B) < 1e-9) { o.ok=false; break; }
+      o.x=(a*A.x+b*B.x+c*Cc.x)/s; o.y=(a*A.y+b*B.y+c*Cc.y)/s; break;
+    }
+    case 'through':
+      o.x1=ps[0].x; o.y1=ps[0].y; o.x2=ps[1].x; o.y2=ps[1].y;
+      if (dist(ps[0],ps[1]) < 1e-9) o.ok=false; break;
+    case 'perpbis': {
+      const dx=ps[1].x-ps[0].x, dy=ps[1].y-ps[0].y;
+      if (Math.hypot(dx,dy) < 1e-9) { o.ok=false; break; }
+      const mx=(ps[0].x+ps[1].x)/2, my=(ps[0].y+ps[1].y)/2;
+      o.x1=mx; o.y1=my; o.x2=mx-dy; o.y2=my+dx; break;
+    }
+    case 'angbis': {
+      const [A,B,Cc]=ps; let ux=A.x-B.x, uy=A.y-B.y, vx=Cc.x-B.x, vy=Cc.y-B.y;
+      const lu=Math.hypot(ux,uy), lv=Math.hypot(vx,vy);
+      if (lu<1e-9 || lv<1e-9) { o.ok=false; break; }
+      ux/=lu; uy/=lu; vx/=lv; vy/=lv;
+      let bx=ux+vx, by=uy+vy; if (Math.hypot(bx,by) < 1e-9){ bx=-uy; by=ux; }
+      const lb=Math.hypot(bx,by);
+      o.x1=B.x; o.y1=B.y; o.x2=B.x+bx/lb*100; o.y2=B.y+by/lb*100; break;
+    }
+    case 'perp': case 'par': {
+      const [L,Q]=ps, dx=L.x2-L.x1, dy=L.y2-L.y1, l=Math.hypot(dx,dy);
+      o.x1=Q.x; o.y1=Q.y;
+      if (o.kind==='perp'){ o.x2=Q.x-dy/l*100; o.y2=Q.y+dx/l*100; }
+      else { o.x2=Q.x+dx/l*100; o.y2=Q.y+dy/l*100; }
+      break;
+    }
+    case 'cp': o.cx=ps[0].x; o.cy=ps[0].y; o.r=dist(ps[0],ps[1]); break;
+    case 'compass': o.cx=ps[2].x; o.cy=ps[2].y; o.r=dist(ps[0],ps[1]); break;
+    case 'cl': o.cx=ps[0].x; o.cy=ps[0].y; o.r=distPL(ps[0],ps[1],ps[2]); break;
+    case 'angle': break;
+  }
+}
+function recompute(){ for (const o of objs) compute(o); }
+function rebuild(){ byId.clear(); for (const o of objs) byId.set(o.id, o); }
+function add(o){ o.id = nid++; objs.push(o); byId.set(o.id, o); compute(o); return o; }
+function deleteObj(id){
+  const del = new Set([id]);
+  for (const o of objs) if (o.p && o.p.some(x => del.has(x))) del.add(o.id);
+  objs = objs.filter(o => !del.has(o.id));
+  rebuild(); recompute();
+}
+function usedLabels(){ return new Set(objs.filter(o => o.type==='point').map(o => o.label)); }
+function nextLabel(){
+  const used = usedLabels();
+  for (let k=0;;k++) for (let i=0;i<26;i++){
+    const L = String.fromCharCode(65+i) + (k ? k : '');
+    if (!used.has(L)) return L;
+  }
+}
+const prefLabel = L => usedLabels().has(L) ? nextLabel() : L;
+
+/* ---------- undo / storage ---------- */
+function snap(){
+  return JSON.stringify({
+    o: objs.map(o => ({id:o.id,type:o.type,kind:o.kind,p:o.p,d:o.d,label:o.label,sub:o.sub,aux:o.aux,
+                       x:o.kind==='inter'?o.x:undefined, y:o.kind==='inter'?o.y:undefined})),
+    s: strokes, n: nid
+  });
+}
+function restore(str){
+  const z = JSON.parse(str); objs = z.o; strokes = z.s; nid = z.n; rebuild(); recompute();
+}
+function pushUndo(){ undoStack.push(snap()); if (undoStack.length > 300) undoStack.shift(); redoStack.length = 0; }
+function undo(){ if (!undoStack.length) return; redoStack.push(snap()); restore(undoStack.pop()); resetPending(); save(); draw(); }
+function redo(){ if (!redoStack.length) return; undoStack.push(snap()); restore(redoStack.pop()); resetPending(); save(); draw(); }
+function save(){ try { localStorage.setItem(STORE, JSON.stringify({snap:snap(), view, showLen})); } catch(e){} }
+function load(){
+  try {
+    const raw = localStorage.getItem(STORE); if (!raw) return;
+    const z = JSON.parse(raw); restore(z.snap); if (z.view) view = z.view; showLen = !!z.showLen;
+  } catch(e){ objs=[]; strokes=[]; nid=1; rebuild(); }
+}
+
+/* ---------- tools ---------- */
+const seg = (a,b,sub='segment') => ({type:'line',kind:'through',sub,p:[a,b]});
+const T = {
+  polygon:{needs:[],hint:[]},
+  point:{needs:['P'],hint:['Kliknij, żeby postawić punkt. Przyciąga do przecięć i do linii.'],make(){}},
+  segment:{needs:['P','P'],hint:['Pierwszy koniec odcinka.','Drugi koniec odcinka.'],make:([a,b])=>add(seg(a,b))},
+  line:{needs:['P','P'],hint:['Pierwszy punkt prostej.','Drugi punkt prostej.'],make:([a,b])=>add(seg(a,b,'line'))},
+  ray:{needs:['P','P'],hint:['Początek półprostej.','Punkt, przez który przechodzi.'],make:([a,b])=>add(seg(a,b,'ray'))},
+  circle:{needs:['P','P'],hint:['Środek okręgu.','Punkt leżący na okręgu.'],make:([c,p])=>add({type:'circle',kind:'cp',p:[c,p]})},
+  compass:{needs:['P','P','P'],hint:['Promień: pierwszy punkt.','Promień: drugi punkt.','Środek okręgu.'],make:([a,b,c])=>add({type:'circle',kind:'compass',p:[a,b,c]})},
+  midpoint:{needs:['P','P'],segOK:true,hint:['Kliknij odcinek albo pierwszy punkt.','Drugi punkt.'],make:([a,b])=>add({type:'point',kind:'mid',p:[a,b],label:nextLabel()})},
+  perpbis:{needs:['P','P'],segOK:true,hint:['Kliknij odcinek albo pierwszy punkt.','Drugi punkt.'],make:([a,b])=>add({type:'line',kind:'perpbis',sub:'line',p:[a,b]})},
+  angbis:{needs:['P','P','P'],hint:['Punkt na pierwszym ramieniu kąta.','Wierzchołek kąta.','Punkt na drugim ramieniu.'],make:([a,b,c])=>add({type:'line',kind:'angbis',sub:'ray',p:[a,b,c]})},
+  perp:{needs:['L','P'],hint:['Kliknij prostą lub odcinek.','Punkt, przez który ma przejść prostopadła.'],make:([l,q])=>add({type:'line',kind:'perp',sub:'line',p:[l,q]})},
+  par:{needs:['L','P'],hint:['Kliknij prostą lub odcinek.','Punkt, przez który ma przejść równoległa.'],make:([l,q])=>add({type:'line',kind:'par',sub:'line',p:[l,q]})},
+  foot:{needs:['L','P'],hint:['Kliknij prostą lub odcinek.','Punkt do zrzutowania na nią.'],make:([l,q])=>add({type:'point',kind:'foot',p:[l,q],label:nextLabel()})},
+  circum:{needs:['P','P','P'],hint:['Pierwszy wierzchołek trójkąta.','Drugi wierzchołek.','Trzeci wierzchołek.'],make:([a,b,c])=>{
+    const o = add({type:'point',kind:'circumcenter',p:[a,b,c],label:prefLabel('O')});
+    add({type:'circle',kind:'cp',p:[o.id,a],aux:true});
+  }},
+  incircle:{needs:['P','P','P'],hint:['Pierwszy wierzchołek trójkąta.','Drugi wierzchołek.','Trzeci wierzchołek.'],make:([a,b,c])=>{
+    const o = add({type:'point',kind:'incenter',p:[a,b,c],label:prefLabel('I')});
+    add({type:'circle',kind:'cl',p:[o.id,a,b]});
+  }},
+  angle:{needs:['P','P','P'],hint:['Punkt na pierwszym ramieniu.','Wierzchołek kąta.','Punkt na drugim ramieniu.'],make:([a,b,c])=>add({type:'angle',kind:'angle',p:[a,b,c]})},
+};
+const OTHER_HINTS = {
+  move:'Przeciągaj punkty albo tło. Kółko myszy przybliża. Dwuklik na punkcie zmienia jego nazwę.',
+  pencil:'Rysuj swobodnie. Na dotyku dwa palce przesuwają i przybliżają.',
+  eraser:'Przeciągnij po kresce ołówka, żeby ją zmazać.',
+  polygon:'Klikaj kolejne wierzchołki. Kliknij pierwszy wierzchołek, żeby zamknąć wielokąt.',
+  delete:'Kliknij obiekt, żeby go usunąć razem ze wszystkim, co od niego zależy.',
+};
+const TOOLBAR = [
+  ['move','Przesuń','V'],['pencil','Ołówek','D'],['eraser','Gumka','E'],'pens','|',
+  ['point','Punkt','P'],['segment','Odcinek','S'],['line','Prosta','L'],['ray','Półprosta','R'],
+  ['polygon','Wielokąt','W'],['circle','Okrąg','O'],['compass','Cyrkiel','K'],'|',
+  ['midpoint','Środek','M'],['perpbis','Symetralna','B'],['angbis','Dwusieczna','A'],
+  ['perp','Prostopadła','T'],['par','Równoległa','N'],['foot','Rzut','F'],
+  ['circum','Okrąg opisany','U'],['incircle','Okrąg wpisany','I'],['angle','Kąt','G'],'|',
+  ['delete','Usuń','X'],'actions'
+];
+const KEYS = {};
+function buildBar(){
+  bar.innerHTML = '';
+  for (const item of TOOLBAR){
+    if (item === '|'){ const s=document.createElement('span'); s.className='sep'; bar.appendChild(s); continue; }
+    if (item === 'pens'){
+      PENS.forEach((c,i) => {
+        const b = document.createElement('button'); b.className='sw'+(i===pen?' on':'');
+        b.style.background = c==='graphite' ? 'var(--graphite)' : c;
+        b.title = 'Kolor ołówka'; b.setAttribute('aria-label','Kolor ołówka '+(i+1));
+        b.onclick = () => { pen=i; setTool('pencil'); buildBar(); };
+        bar.appendChild(b);
+      });
+      continue;
+    }
+    if (item === 'actions'){
+      const acts = [
+        ['Cofnij', undo, 'Ctrl+Z'], ['Ponów', redo, ''],
+        [showLen ? 'Ukryj długości' : 'Pokaż długości', () => { showLen=!showLen; save(); buildBar(); draw(); }, ''],
+        ['−', () => zoomAt(W/2,H/2,1/1.25), ''], ['+', () => zoomAt(W/2,H/2,1.25), ''],
+        ['Zmaż ołówek', () => { if(!strokes.length) return; pushUndo(); strokes=[]; save(); draw(); flash('Zmazano kreski. Cofnij przywraca.'); }, ''],
+        ['Wyczyść wszystko', () => { pushUndo(); objs=[]; strokes=[]; rebuild(); resetPending(); save(); draw(); flash('Wyczyszczono. Cofnij przywraca.'); }, ''],
+      ];
+      const s=document.createElement('span'); s.className='sep'; bar.appendChild(s);
+      for (const [label, fn, k] of acts){
+        const b=document.createElement('button'); b.textContent=label; b.onclick=fn;
+        if (k){ const kb=document.createElement('kbd'); kb.textContent=k; b.appendChild(kb); }
+        bar.appendChild(b);
+      }
+      continue;
+    }
+    const [id,label,key] = item; KEYS[key.toLowerCase()] = id;
+    const b = document.createElement('button'); b.textContent = label; b.dataset.tool = id;
+    if (id === tool) b.classList.add('on');
+    const kb = document.createElement('kbd'); kb.textContent = key; b.appendChild(kb);
+    b.onclick = () => setTool(id);
+    bar.appendChild(b);
+  }
+}
+function setTool(id){
+  tool = id; resetPending();
+  for (const b of bar.querySelectorAll('button[data-tool]')) b.classList.toggle('on', b.dataset.tool === id);
+  cv.style.cursor = id === 'move' ? 'grab' : 'crosshair';
+  updateHint(); draw();
+}
+function resetPending(){ pending = []; polyPts = []; updateHint(); }
+function updateHint(){
+  if (T[tool] && tool !== 'polygon') msgEl.textContent = T[tool].hint[pending.length] || '';
+  else msgEl.textContent = OTHER_HINTS[tool] || '';
+}
+let flashTimer;
+function flash(t){ flashEl.textContent = t; clearTimeout(flashTimer); flashTimer = setTimeout(() => flashEl.textContent='', 2600); }
+
+/* ---------- view / hit testing ---------- */
+const toW = (sx,sy) => ({x:sx/view.s+view.x, y:sy/view.s+view.y});
+const toS = (x,y) => [(x-view.x)*view.s, (y-view.y)*view.s];
+function evPos(e){ const r=cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
+function zoomAt(sx, sy, f){
+  const w = toW(sx,sy); view.s = clamp(view.s*f, 0.15, 12);
+  view.x = w.x - sx/view.s; view.y = w.y - sy/view.s; save(); draw();
+}
+const tol = () => 12/view.s;
+function hitPoint(w, t){
+  let best=null, bd=t;
+  for (const o of objs) if (o.type==='point' && o.ok){ const d=Math.hypot(o.x-w.x,o.y-w.y); if (d<bd){bd=d; best=o;} }
+  return best;
+}
+function distToObj(o, w){
+  if (o.type === 'circle') return Math.abs(Math.hypot(w.x-o.cx, w.y-o.cy) - o.r);
+  if (o.type === 'line'){
+    const dx=o.x2-o.x1, dy=o.y2-o.y1; let t=((w.x-o.x1)*dx+(w.y-o.y1)*dy)/(dx*dx+dy*dy);
+    if (o.sub==='segment') t=clamp(t,0,1); else if (o.sub==='ray') t=Math.max(0,t);
+    return Math.hypot(o.x1+t*dx-w.x, o.y1+t*dy-w.y);
+  }
+  return Infinity;
+}
+function hitCurves(w, t){
+  return objs.filter(o => (o.type==='line'||o.type==='circle') && o.ok && distToObj(o,w) < t)
+             .sort((a,b) => distToObj(a,w) - distToObj(b,w));
+}
+function hitAngle(w){
+  for (const o of objs) if (o.type==='angle' && o.ok){
+    const B = P(o.p[1]); const d = Math.hypot(B.x-w.x, B.y-w.y)*view.s;
+    if (d > 8 && d < 42) return o;
+  }
+  return null;
+}
+function snapInfo(w){
+  const t = tol(), hp = hitPoint(w, t);
+  if (hp) return {type:'existing', o:hp, x:hp.x, y:hp.y};
+  const cs = hitCurves(w, t); let best=null, bd=t;
+  for (let i=0;i<cs.length;i++) for (let j=i+1;j<cs.length;j++)
+    for (const q of intersections(cs[i], cs[j])){ const d=Math.hypot(q.x-w.x,q.y-w.y); if (d<bd){bd=d; best={a:cs[i],b:cs[j],q};} }
+  if (best) return {type:'inter', a:best.a, b:best.b, x:best.q.x, y:best.q.y};
+  if (cs.length){ const c=cs[0], tt=paramOn(c,w), q=evalOn(c,tt); return {type:'on', c, t:tt, x:q.x, y:q.y}; }
+  return {type:'free', x:w.x, y:w.y};
+}
+function materialize(s){
+  if (s.type === 'existing') return s.o;
+  if (s.type === 'inter') return add({type:'point',kind:'inter',p:[s.a.id,s.b.id],d:{x:s.x,y:s.y},label:nextLabel()});
+  if (s.type === 'on') return add({type:'point',kind:'on',p:[s.c.id],d:{t:s.t},label:nextLabel()});
+  return add({type:'point',kind:'free',d:{x:s.x,y:s.y},label:nextLabel()});
+}
+
+/* ---------- construction clicks ---------- */
+function construct(w){
+  const t = T[tool]; if (!t) return;
+  if (tool === 'polygon') return polygonClick(w);
+  const need = t.needs[pending.length];
+  if (need === 'L'){
+    const l = hitCurves(w, tol()).find(o => o.type === 'line');
+    if (!l) { flash('Tu trzeba kliknąć prostą lub odcinek.'); return; }
+    if (!pending.length) pushUndo();
+    pending.push(l.id);
+  } else {
+    if (t.segOK && !pending.length && !hitPoint(w, tol())){
+      const s = hitCurves(w, tol()).find(o => o.type==='line' && o.kind==='through' && o.sub==='segment');
+      if (s){ pushUndo(); t.make([s.p[0], s.p[1]]); finish(); return; }
+    }
+    if (!pending.length) pushUndo();
+    const p = materialize(snapInfo(w));
+    if (pending.length && pending[pending.length-1] === p.id){ flash('Wybierz inny punkt.'); return; }
+    pending.push(p.id);
+  }
+  if (pending.length === t.needs.length){ t.make(pending.slice()); finish(); return; }
+  updateHint(); save(); draw();
+}
+function finish(){ pending = []; recompute(); save(); updateHint(); draw(); }
+function polygonClick(w){
+  if (polyPts.length >= 3){
+    const f = P(polyPts[0]);
+    if (f && Math.hypot(f.x-w.x, f.y-w.y) < tol()){
+      add(seg(polyPts[polyPts.length-1], polyPts[0])); polyPts = []; save(); draw(); return;
+    }
+  }
+  if (!polyPts.length) pushUndo();
+  const p = materialize(snapInfo(w));
+  if (polyPts.length && polyPts[polyPts.length-1] === p.id) return;
+  if (polyPts.length) add(seg(polyPts[polyPts.length-1], p.id));
+  polyPts.push(p.id); save(); draw();
+}
+
+/* ---------- pencil ---------- */
+function strokeHit(s, w, t){
+  const pts = s.pts;
+  if (pts.length === 1) return Math.hypot(pts[0][0]-w.x, pts[0][1]-w.y) < t;
+  for (let i=1;i<pts.length;i++){
+    const [x1,y1]=pts[i-1], [x2,y2]=pts[i], dx=x2-x1, dy=y2-y1, L=dx*dx+dy*dy;
+    const u = L ? clamp(((w.x-x1)*dx+(w.y-y1)*dy)/L, 0, 1) : 0;
+    if (Math.hypot(x1+u*dx-w.x, y1+u*dy-w.y) < t) return true;
+  }
+  return false;
+}
+function eraseAt(w){
+  const n = strokes.length; strokes = strokes.filter(s => !strokeHit(s, w, 10/view.s));
+  if (strokes.length !== n) draw();
+}
+
+/* ---------- pointer events ---------- */
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  const [sx,sy] = evPos(e), w = toW(sx,sy);
+  if (e.pointerType === 'touch'){
+    touches.set(e.pointerId, {x:sx, y:sy});
+    if (touches.size === 2){
+      if (curStroke){ strokes.pop(); undoStack.pop(); curStroke = null; }
+      drag = null; pan = null; erasing = false;
+      const [a,b] = [...touches.values()];
+      pinch = {d0:Math.hypot(a.x-b.x,a.y-b.y)||1, s0:view.s, w0:toW((a.x+b.x)/2,(a.y+b.y)/2)};
+      draw(); return;
+    }
+    if (touches.size > 2) return;
+  }
+  if (e.button === 1 || e.button === 2){ pan = {sx, sy, vx:view.x, vy:view.y}; return; }
+  if (tool === 'pencil'){
+    pushUndo(); curStroke = {c:PENS[pen], w:2.4, pts:[[w.x,w.y]]}; strokes.push(curStroke); draw(); return;
+  }
+  if (tool === 'eraser'){ pushUndo(); erasing = true; eraseAt(w); return; }
+  if (tool === 'move'){
+    const hp = hitPoint(w, tol());
+    if (hp && (hp.kind==='free' || hp.kind==='on')){ pushUndo(); drag = {o:hp}; cv.style.cursor='grabbing'; }
+    else { pan = {sx, sy, vx:view.x, vy:view.y}; cv.style.cursor='grabbing'; }
+    return;
+  }
+  if (tool === 'delete'){
+    const target = hitPoint(w, tol()) || hitAngle(w) || hitCurves(w, tol())[0];
+    if (target){ pushUndo(); deleteObj(target.id); save(); draw(); }
+    return;
+  }
+  construct(w);
+});
+cv.addEventListener('pointermove', e => {
+  const [sx,sy] = evPos(e);
+  if (e.pointerType === 'touch' && touches.has(e.pointerId)){
+    touches.set(e.pointerId, {x:sx, y:sy});
+    if (pinch && touches.size === 2){
+      const [a,b] = [...touches.values()];
+      const d = Math.hypot(a.x-b.x, a.y-b.y), mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+      view.s = clamp(pinch.s0*d/pinch.d0, 0.15, 12);
+      view.x = pinch.w0.x - mx/view.s; view.y = pinch.w0.y - my/view.s; draw(); return;
+    }
+  }
+  const w = toW(sx,sy);
+  if (pan){ view.x = pan.vx - (sx-pan.sx)/view.s; view.y = pan.vy - (sy-pan.sy)/view.s; draw(); return; }
+  if (drag){
+    const o = drag.o;
+    if (o.kind === 'free'){ o.d.x = w.x; o.d.y = w.y; }
+    else { const c = P(o.p[0]); o.d.t = paramOn(c, w); }
+    recompute(); draw(); return;
+  }
+  if (curStroke){
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of evs){ const [cx,cy]=evPos(ev), q=toW(cx,cy); curStroke.pts.push([q.x,q.y]); }
+    draw(); return;
+  }
+  if (erasing){ eraseAt(w); return; }
+  hover = (e.pointerType === 'mouse' || e.pointerType === 'pen') ? w : null;
+  if (tool === 'move' && e.pointerType === 'mouse'){
+    const hp = hitPoint(w, tol());
+    cv.style.cursor = hp && (hp.kind==='free'||hp.kind==='on') ? 'pointer' : 'grab';
+  }
+  if (T[tool]) draw();
+});
+function endPointer(e){
+  touches.delete(e.pointerId);
+  if (touches.size < 2) pinch = null;
+  if (drag || curStroke || erasing || pan) save();
+  if (curStroke && curStroke.pts.length > 1){
+    // drop near-duplicate points
+    const out=[curStroke.pts[0]];
+    for (const p of curStroke.pts){ const l=out[out.length-1]; if (Math.hypot(p[0]-l[0],p[1]-l[1]) > 0.6/view.s) out.push(p); }
+    curStroke.pts = out;
+  }
+  drag = null; pan = null; curStroke = null; erasing = false;
+  if (tool === 'move') cv.style.cursor = 'grab';
+  draw();
+}
+cv.addEventListener('pointerup', endPointer);
+cv.addEventListener('pointercancel', endPointer);
+cv.addEventListener('pointerleave', () => { hover = null; draw(); });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => {
+  e.preventDefault(); const [sx,sy] = evPos(e);
+  if (e.ctrlKey || Math.abs(e.deltaY) >= Math.abs(e.deltaX)) zoomAt(sx, sy, Math.exp(-e.deltaY*0.0015));
+  else { view.x += e.deltaX/view.s; save(); draw(); }
+}, {passive:false});
+cv.addEventListener('dblclick', e => {
+  if (tool !== 'move') return;
+  const [sx,sy] = evPos(e), hp = hitPoint(toW(sx,sy), tol());
+  if (!hp) return;
+  const [px,py] = toS(hp.x, hp.y);
+  ren.style.left = (px+10)+'px'; ren.style.top = (py-34)+'px'; ren.style.display='block';
+  ren.value = hp.label; ren.dataset.id = hp.id; ren.focus(); ren.select();
+});
+function closeRename(apply){
+  if (ren.style.display !== 'block') return;
+  const o = P(+ren.dataset.id), v = ren.value.trim();
+  ren.style.display = 'none';
+  if (apply && o && v && v !== o.label){ pushUndo(); o.label = v; save(); }
+  draw();
+}
+ren.addEventListener('keydown', e => { if (e.key==='Enter') closeRename(true); if (e.key==='Escape') closeRename(false); e.stopPropagation(); });
+ren.addEventListener('blur', () => closeRename(true));
+
+window.addEventListener('keydown', e => {
+  if (e.target === ren) return;
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'y'){ e.preventDefault(); redo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Escape'){ resetPending(); draw(); return; }
+  if (KEYS[k]) setTool(KEYS[k]);
+});
+
+/* ---------- drawing ---------- */
+function drawGrid(){
+  const step = UNIT*view.s; if (step < 8) return;
+  const x0 = Math.floor(view.x/UNIT)*UNIT, y0 = Math.floor(view.y/UNIT)*UNIT;
+  const w1 = toW(W,H);
+  ctx.lineWidth = 1;
+  for (let x=x0; x<=w1.x; x+=UNIT){
+    const [sx] = toS(x,0); ctx.strokeStyle = Math.round(x/UNIT)%5===0 ? C['grid-strong'] : C.grid;
+    ctx.beginPath(); ctx.moveTo(Math.round(sx)+.5,0); ctx.lineTo(Math.round(sx)+.5,H); ctx.stroke();
+  }
+  for (let y=y0; y<=w1.y; y+=UNIT){
+    const [,sy] = toS(0,y); ctx.strokeStyle = Math.round(y/UNIT)%5===0 ? C['grid-strong'] : C.grid;
+    ctx.beginPath(); ctx.moveTo(0,Math.round(sy)+.5); ctx.lineTo(W,Math.round(sy)+.5); ctx.stroke();
+  }
+}
+function lineEnds(o){
+  const dx=o.x2-o.x1, dy=o.y2-o.y1, len=Math.hypot(dx,dy);
+  const c = toW(W/2,H/2);
+  const ext = (Math.hypot(W,H)/view.s + Math.hypot(o.x1-c.x, o.y1-c.y)) / len;
+  const t0 = o.sub==='line' ? -ext : 0, t1 = o.sub==='segment' ? 1 : ext;
+  return [toS(o.x1+t0*dx, o.y1+t0*dy), toS(o.x1+t1*dx, o.y1+t1*dy)];
+}
+const isAux = o => o.aux || AUX.has(o.kind);
+function drawCurve(o, highlight){
+  const aux = isAux(o);
+  ctx.strokeStyle = highlight ? C.sel : (aux ? C.aux : C.ink);
+  ctx.lineWidth = highlight ? 3 : (aux ? 1.4 : 2);
+  ctx.setLineDash(aux && !highlight ? [7,5] : []);
+  ctx.beginPath();
+  if (o.type === 'circle'){ const [cx,cy]=toS(o.cx,o.cy); ctx.arc(cx, cy, o.r*view.s, 0, Math.PI*2); }
+  else { const [a,b]=lineEnds(o); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); }
+  ctx.stroke(); ctx.setLineDash([]);
+}
+function labelText(text, x, y, font, color, align='left'){
+  ctx.font = font; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 4; ctx.strokeStyle = C.paper; ctx.lineJoin = 'round';
+  ctx.strokeText(text, x, y); ctx.fillStyle = color; ctx.fillText(text, x, y);
+}
+function drawAngle(o){
+  const [A,B,Cc] = o.p.map(P), [bx,by] = toS(B.x,B.y);
+  const a1 = Math.atan2(A.y-B.y, A.x-B.x), a2 = Math.atan2(Cc.y-B.y, Cc.x-B.x);
+  let d = a2 - a1; while (d <= -Math.PI) d += 2*Math.PI; while (d > Math.PI) d -= 2*Math.PI;
+  const deg = Math.abs(d)*180/Math.PI, r = 26;
+  ctx.strokeStyle = C.sel; ctx.fillStyle = C.sel; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (Math.abs(deg-90) < 0.05){
+    const s=15, ux=Math.cos(a1)*s, uy=Math.sin(a1)*s, vx=Math.cos(a2)*s, vy=Math.sin(a2)*s;
+    ctx.moveTo(bx+ux,by+uy); ctx.lineTo(bx+ux+vx,by+uy+vy); ctx.lineTo(bx+vx,by+vy);
+    ctx.stroke(); ctx.globalAlpha=.15; ctx.lineTo(bx,by); ctx.closePath(); ctx.fill();
+  } else {
+    ctx.moveTo(bx,by); ctx.arc(bx, by, r, a1, a1+d, d<0); ctx.closePath();
+    ctx.globalAlpha=.15; ctx.fill(); ctx.globalAlpha=1;
+    ctx.beginPath(); ctx.arc(bx, by, r, a1, a1+d, d<0); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  const m = a1 + d/2, txt = (Math.abs(deg-90)<0.05 ? '90' : deg.toFixed(1).replace('.',',')) + '°';
+  labelText(txt, bx+Math.cos(m)*(r+20), by+Math.sin(m)*(r+20), '600 13px "Instrument Sans",system-ui,sans-serif', C.sel, 'center');
+}
+function drawStroke(s){
+  const pts = s.pts; ctx.strokeStyle = penColor(s.c); ctx.fillStyle = penColor(s.c);
+  const lw = Math.max(1, s.w*view.s); ctx.lineWidth = lw; ctx.lineCap='round'; ctx.lineJoin='round';
+  if (pts.length === 1){ const [x,y]=toS(pts[0][0],pts[0][1]); ctx.beginPath(); ctx.arc(x,y,lw/2,0,Math.PI*2); ctx.fill(); return; }
+  ctx.beginPath(); let [x0,y0] = toS(pts[0][0],pts[0][1]); ctx.moveTo(x0,y0);
+  for (let i=1;i<pts.length-1;i++){
+    const [x1,y1]=toS(pts[i][0],pts[i][1]), [x2,y2]=toS(pts[i+1][0],pts[i+1][1]);
+    ctx.quadraticCurveTo(x1, y1, (x1+x2)/2, (y1+y2)/2);
+  }
+  const [xl,yl] = toS(pts[pts.length-1][0], pts[pts.length-1][1]); ctx.lineTo(xl,yl); ctx.stroke();
+}
+function drawPreview(){
+  if (!hover || !T[tool]) return;
+  const s = snapInfo(hover), [hx,hy] = toS(s.x, s.y);
+  const startId = tool==='polygon' ? polyPts[polyPts.length-1] : pending[pending.length-1];
+  const start = startId != null ? P(startId) : null;
+  ctx.setLineDash([5,5]); ctx.strokeStyle = C.sel; ctx.lineWidth = 1.4;
+  if (start && start.type === 'point' && start.ok){
+    const [px,py] = toS(start.x, start.y);
+    if (tool === 'circle' && pending.length === 1){ ctx.beginPath(); ctx.arc(px,py,Math.hypot(hx-px,hy-py),0,Math.PI*2); ctx.stroke(); }
+    else if (['segment','line','ray','polygon'].includes(tool)){ ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(hx,hy); ctx.stroke(); }
+  }
+  ctx.setLineDash([]);
+  if (T[tool].needs && T[tool].needs[pending.length] === 'L' && tool !== 'polygon'){
+    const l = hitCurves(hover, tol()).find(o => o.type==='line'); if (l) drawCurve(l, true); return;
+  }
+  ctx.strokeStyle = C.sel; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(hx, hy, s.type==='inter' ? 9 : 7, 0, Math.PI*2); ctx.stroke();
+}
+function draw(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle = C.paper; ctx.fillRect(0,0,W,H);
+  drawGrid();
+  const sel = new Set([...pending, ...polyPts]);
+  for (const o of objs) if (o.ok && o.type==='circle') drawCurve(o, sel.has(o.id));
+  for (const o of objs) if (o.ok && o.type==='line') drawCurve(o, sel.has(o.id));
+  if (showLen){
+    for (const o of objs) if (o.ok && o.type==='line' && o.sub==='segment'){
+      const [a,b] = lineEnds(o), dx=b[0]-a[0], dy=b[1]-a[1], l=Math.hypot(dx,dy); if (l < 30) continue;
+      const len = Math.hypot(o.x2-o.x1, o.y2-o.y1)/UNIT;
+      labelText(len.toFixed(2).replace('.',','), (a[0]+b[0])/2 - dy/l*13, (a[1]+b[1])/2 + dx/l*13,
+                '500 12px "Instrument Sans",system-ui,sans-serif', C.muted, 'center');
+    }
+    for (const o of objs) if (o.ok && o.type==='circle' && o.r*view.s > 20){
+      const [cx,cy] = toS(o.cx,o.cy);
+      labelText('r = '+(o.r/UNIT).toFixed(2).replace('.',','), cx, cy + o.r*view.s + 14, '500 12px "Instrument Sans",system-ui,sans-serif', C.muted, 'center');
+    }
+  }
+  for (const o of objs) if (o.ok && o.type==='angle') drawAngle(o);
+  for (const s of strokes) drawStroke(s);
+  drawPreview();
+  for (const o of objs) if (o.ok && o.type==='point'){
+    const [x,y] = toS(o.x,o.y);
+    if (sel.has(o.id)){ ctx.strokeStyle=C.sel; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(x,y,9,0,Math.PI*2); ctx.stroke(); }
+    ctx.beginPath();
+    if (o.kind === 'free'){ ctx.arc(x,y,5,0,Math.PI*2); ctx.fillStyle=C.point; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle=C.paper; ctx.stroke(); }
+    else if (o.kind === 'on'){ ctx.arc(x,y,4.5,0,Math.PI*2); ctx.fillStyle=C.paper; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle=C.point; ctx.stroke(); }
+    else { ctx.arc(x,y,3.8,0,Math.PI*2); ctx.fillStyle=C.fg; ctx.fill(); }
+    labelText(o.label, x+9, y-11, 'italic 500 17px "STIX Two Text",Georgia,"Times New Roman",serif', C.fg);
+  }
+}
+
+/* ---------- init ---------- */
+function resize(){
+  const r = wrap.getBoundingClientRect(); DPR = window.devicePixelRatio || 1;
+  W = r.width; H = r.height;
+  cv.width = Math.round(W*DPR); cv.height = Math.round(H*DPR);
+  cv.style.width = W+'px'; cv.style.height = H+'px'; draw();
+}
+readColors(); load(); buildBar(); setTool('move');
+new ResizeObserver(resize).observe(wrap);
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readColors(); draw(); });
+new MutationObserver(() => { readColors(); draw(); }).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+if (document.fonts) document.fonts.ready.then(draw);
+resize();
+})();
+</script>
+</body>
+</html>
